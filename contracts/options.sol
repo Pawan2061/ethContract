@@ -22,9 +22,25 @@ contract OptionContract {
         Status status;
     }
 
+    mapping(address => Option[]) public options;
+
+    constructor() {
+        owner = msg.sender;
+        index = 0;
+    }
+
     event OptionCreated(address indexed seller, uint asset);
-    event OptionExercised(address _buyer, address _seller, uint256 expiryTime);
-    event OptionSold(address _seller,address _buyer,uint strikePrice);
+    event OptionExercised(
+        address indexed buyer,
+        address indexed seller,
+        uint index
+    );
+    event OptionSold(
+        address indexed seller,
+        address indexed buyer,
+        uint strikePrice
+    );
+    event OptionUpdated(address indexed seller, uint asset, uint256 expiryTime);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner can call this function");
@@ -39,44 +55,42 @@ contract OptionContract {
         );
         _;
     }
-    modifier validateOptionIfSoldOrExpired(
-        address _seller,
+
+    modifier validateUpdateOption(
         uint _index,
-        uint256 _expiryTime
+        uint256 _expiryTime,
+        uint _asset,
+        address _seller
     ) {
+        require(_seller != address(0), "Invalid seller address");
         require(_index < options[_seller].length, "Invalid option index");
         require(
             options[_seller][_index].status != Status.Sold &&
                 options[_seller][_index].status != Status.Expired,
-            "Option is sold or expired"
+            "This option cannot be updated"
+        );
+        require(block.timestamp < _expiryTime, "Expiry time has passed");
+        require(_asset > 0, "Asset value must be greater than zero");
+        _;
+    }
+
+    modifier validateOptionIfSoldOrExpired(address _seller, uint _index) {
+        require(_index < options[_seller].length, "Invalid option index");
+        require(
+            options[_seller][_index].status == Status.Available,
+            "Option is already sold or expired"
         );
         require(
             block.timestamp < options[_seller][_index].expiryTime,
-            "Option has already passed the expiry  time"
+            "Option has already expired"
         );
         _;
-    }
-
-    modifier validExerciseOption(address _seller, uint _assetPrice) {
-        require(_seller != address(0), "Invalid seller address");
-        require(_assetPrice > 0, "Asset price needs to be higher");
-
-        _;
-    }
-
-    function validateSelling(uint _strikePrice) public returns (bool) {}
-
-    mapping(address => Option[]) public options;
-
-    constructor() {
-        owner = msg.sender;
-        index = 0;
     }
 
     function addOption(
         uint _asset,
         uint256 _expiryTime
-    ) public onlyOwner validAddOption(msg.sender, _expiryTime) {
+    ) public validAddOption(msg.sender, _expiryTime) {
         options[msg.sender].push(
             Option({
                 index: index,
@@ -89,45 +103,75 @@ contract OptionContract {
                 status: Status.Available
             })
         );
-        index += 1;
+        index++;
 
         emit OptionCreated(msg.sender, _asset);
     }
 
-    function exerciseOption(
+    function exerciseOption(uint _index, address _seller) public {
+        require(_index < options[_seller].length, "Invalid option index");
+        require(
+            options[_seller][_index].buyer == msg.sender,
+            "Only buyer can exercise this option"
+        );
+        require(
+            block.timestamp < options[_seller][_index].expiryTime,
+            "Option has expired"
+        );
+
+        options[_seller][_index].status = Status.Expired;
+
+        emit OptionExercised(msg.sender, _seller, _index);
+    }
+
+    function updateOption(
         uint _index,
-        address _seller,
+        uint _asset,
         uint256 _expiryTime
-    ) public validateOptionIfSoldOrExpired(_seller, _index, _expiryTime) {
-        options[_seller][_index].status = Status.Available;
-        options[_seller][_index].buyer = msg.sender;
+    ) public validateUpdateOption(_index, _expiryTime, _asset, msg.sender) {
+        options[msg.sender][_index].asset = _asset;
+        options[msg.sender][_index].expiryTime = _expiryTime;
 
-        emit OptionExercised(msg.sender, _seller, _expiryTime);
+        emit OptionUpdated(msg.sender, _asset, _expiryTime);
     }
 
-    function updateOption() public {
+    function deleteOption(address _seller, uint _index) public {
+        require(_index < options[_seller].length, "Invalid option index");
+        require(
+            options[_seller][_index].status == Status.Available,
+            "Cannot delete a sold or expired option"
+        );
 
+        // Swap with last element and pop to maintain array integrity
+        uint lastIndex = options[_seller].length - 1;
+        options[_seller][_index] = options[_seller][lastIndex];
+        options[_seller].pop();
     }
 
-    function deleteOption() public {}
+    function getOptions(address _seller) public view returns (Option[] memory) {
+        return options[_seller];
+    }
 
-    function toggleOption() public {}
+    function getOption(
+        uint _index,
+        address _seller
+    ) public view returns (Option memory) {
+        require(_index < options[_seller].length, "Invalid option index");
+        return options[_seller][_index];
+    }
 
     function buyOption(
         uint _index,
         address _seller,
-        uint _strikePrice,
-        uint256 _expiryTime
-    ) public validateOptionIfSoldOrExpired(_seller, _index, _expiryTime) {
+        uint _strikePrice
+    ) public validateOptionIfSoldOrExpired(_seller, _index) {
+        require(_strikePrice > 0, "Strike price must be greater than zero");
+
         options[_seller][_index].status = Status.Sold;
-
+        options[_seller][_index].buyer = msg.sender;
         options[_seller][_index].strikePrice = _strikePrice;
-
-
-
+        options[_seller][_index].transactionTime = block.timestamp;
 
         emit OptionSold(_seller, msg.sender, _strikePrice);
-
-
     }
 }
