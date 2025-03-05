@@ -109,7 +109,7 @@ contract OptionContract {
 
         if (_index != lastIndex) {
             options[msg.sender][_index] = options[msg.sender][lastIndex];
-            options[msg.sender][_index].index = _index;  // Update index
+            options[msg.sender][_index].index = _index; 
         }
 
         options[msg.sender].pop();
