@@ -1,6 +1,6 @@
 pragma solidity ^0.8.28;
 
-contract Lock {
+contract Future {
     address public owner;
     uint public index;
 
@@ -19,9 +19,11 @@ contract Lock {
         uint256 leverage;
         uint256 entryPrice;
         uint256 amount;
+        uint256 margin;
         uint256 liquidationPrice;
         Status status;
     }
+    Position[] positions;
 
     mapping(address => uint256) public walletBalance;
     mapping(address => Position[]) public userPositions;
@@ -41,6 +43,8 @@ contract Lock {
     }
 
     function addPosition(
+        string memory _symbol,
+        PositionType _positionType,
         uint256 _amount,
         uint256 _leverage,
         uint256 _entryPrice
@@ -49,5 +53,45 @@ contract Lock {
             walletBalance[msg.sender] >= (_amount / _leverage),
             "Insufficient Margin"
         );
+
+        uint256 liquidationPrice;
+        if (_positionType == PositionType.Long) {
+            liquidationPrice = _entryPrice * (1 - (1 / _leverage));
+        } else {
+            liquidationPrice = _entryPrice * (1 + (1 / _leverage));
+        }
+
+        userPositions[msg.sender].push(
+            Position({
+                user: msg.sender,
+                symbol: _symbol,
+                positionType: _positionType,
+                leverage: _leverage,
+                entryPrice: _entryPrice,
+                amount: _amount,
+                liquidationPrice: liquidationPrice,
+                status: Status.Open,
+                margin: _amount / _leverage
+            })
+        );
+    }
+
+    function getPositions() public view returns (Position[] memory) {
+        require(positions.length > 0, "Total positions is less than 0");
+
+        return positions;
+    }
+    function getUserPositions(
+        address _user
+    ) public view returns (Position[] memory) {
+        require(
+            userPositions[_user].length > 0,
+            "user doesnt have any positions"
+        );
+
+        return userPositions[_user];
     }
 }
+
+function closePosition() {}
+function checkLiquidation() {}
