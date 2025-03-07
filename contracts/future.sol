@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 contract Future {
     address public owner;
-    uint public positionIndex;
+    uint256 public positionIndex;
 
     enum Status {
         Open,
@@ -13,6 +13,7 @@ contract Future {
         Long,
         Short
     }
+
     struct Position {
         uint256 index;
         address user;
@@ -27,9 +28,13 @@ contract Future {
     }
 
     Position[] public positions;
-
     mapping(address => uint256) public walletBalance;
     mapping(address => Position[]) public userPositions;
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not contract owner");
+        _;
+    }
 
     modifier validateAddPosition(
         uint256 _amount,
@@ -43,16 +48,30 @@ contract Future {
         _;
     }
 
-    modifier validateDeleteOption(uint256 _index) {
+    modifier validateDeletePosition(uint256 _index) {
         require(positions[_index].user == msg.sender, "Invalid user attempt");
-        _;
         require(
             positions[_index].status == Status.Closed,
-            "Position already closed"
+            "Position is still open"
         );
+        _;
     }
+
     constructor() {
         owner = msg.sender;
+    }
+
+    /// @notice Deposit funds into the contract
+    function depositFunds() public payable {
+        require(msg.value > 0, "Deposit must be greater than 0");
+        walletBalance[msg.sender] += msg.value;
+    }
+
+    /// @notice Withdraw funds from the contract
+    function withdrawFunds(uint256 amount) public {
+        require(walletBalance[msg.sender] >= amount, "Insufficient funds");
+        walletBalance[msg.sender] -= amount;
+        payable(msg.sender).transfer(amount);
     }
 
     function addPosition(
@@ -62,10 +81,10 @@ contract Future {
         uint256 _leverage,
         uint256 _entryPrice
     ) public validateAddPosition(_amount, _leverage, _entryPrice) {
-        uint256 requiredMargin = _amount / _leverage;
+        uint256 requiredMargin = (_amount * 1e18) / _leverage;
         require(
             walletBalance[msg.sender] >= requiredMargin,
-            "Insufficient Margin"
+            "Insufficient margin"
         );
 
         uint256 liquidationPrice;
@@ -95,25 +114,49 @@ contract Future {
         positions.push(newPosition);
         userPositions[msg.sender].push(newPosition);
 
+        walletBalance[msg.sender] -= requiredMargin;
         positionIndex++;
     }
 
-    function getPositions() public view returns (Position[] memory) {
-        return positions;
-    }
+    function closePosition(uint256 positionId, uint256 exitPrice) public {
+        require(positionId < positions.length, "Invalid position ID");
+        Position storage position = positions[positionId];
 
-    function getUserPositions(
-        address _user
-    ) public view returns (Position[] memory) {
-        return userPositions[_user];
-    }
+        require(position.user == msg.sender, "Not position owner");
+        require(position.status == Status.Open, "Position already closed");
 
-    function getPositionById(
-        uint _index
-    ) public view returns (Position memory) {
-        return positions[_index];
+        uint256 profitOrLoss;
+        if (position.positionType == PositionType.Long) {
+            profitOrLoss =
+                ((exitPrice - position.entryPrice) *
+                    position.amount *
+                    position.leverage) /
+                position.entryPrice;
+        } else {
+            profitOrLoss =
+                ((position.entryPrice - exitPrice) *
+                    position.amount *
+                    position.leverage) /
+                position.entryPrice;
+        }
+
+        if (
+            (exitPrice > position.entryPrice &&
+                position.positionType == PositionType.Long) ||
+            (exitPrice < position.entryPrice &&
+                position.positionType == PositionType.Short)
+        ) {
+            walletBalance[msg.sender] += profitOrLoss;
+        } else {
+            require(
+                walletBalance[msg.sender] >= profitOrLoss,
+                "Insufficient balance to cover loss"
+            );
+            walletBalance[msg.sender] -= profitOrLoss;
+        }
+
+        position.status = Status.Closed;
     }
-    function deletePosition() public {}
 
     function checkLiquidation(
         uint256 currentPrice
@@ -132,52 +175,24 @@ contract Future {
         }
         return (true, "Successfully validated");
     }
-    function liquidate() public {}
-    function closePosition(uint256 positionId, uint256 exitPrice) public {
-        require(positionId < positions.length, "Invalid position ID");
-        Position storage position = positions[positionId];
 
-        require(position.user == msg.sender, "Not position owner");
-        require(position.status == Status.Open, "Position already closed");
+    function getPositions() public view returns (Position[] memory) {
+        return positions;
+    }
 
-        uint256 profitOrLoss;
-        if (position.positionType == PositionType.Long) {
-            profitOrLoss = (exitPrice > position.entryPrice)
-                ? (exitPrice - position.entryPrice) * position.amount
-                : (position.entryPrice - exitPrice) * position.amount;
-        } else {
-            profitOrLoss = (position.entryPrice > exitPrice)
-                ? (position.entryPrice - exitPrice) * position.amount
-                : (exitPrice - position.entryPrice) * position.amount;
-        }
+    function getUserPositions(
+        address _user
+    ) public view returns (Position[] memory) {
+        return userPositions[_user];
+    }
 
-        if (
-            exitPrice >= position.entryPrice &&
-            position.positionType == PositionType.Long
-        ) {
-            walletBalance[msg.sender] += profitOrLoss;
-        } else if (
-            exitPrice < position.entryPrice &&
-            position.positionType == PositionType.Long
-        ) {
-            require(
-                walletBalance[msg.sender] >= profitOrLoss,
-                "Insufficient balance"
-            );
-            walletBalance[msg.sender] -= profitOrLoss;
-        } else if (
-            exitPrice <= position.entryPrice &&
-            position.positionType == PositionType.Short
-        ) {
-            walletBalance[msg.sender] += profitOrLoss;
-        } else {
-            require(
-                walletBalance[msg.sender] >= profitOrLoss,
-                "Insufficient balance"
-            );
-            walletBalance[msg.sender] -= profitOrLoss;
-        }
+    function getPositionById(
+        uint256 _index
+    ) public view returns (Position memory) {
+        return positions[_index];
+    }
 
-        position.status = Status.Closed;
+    receive() external payable {
+        depositFunds();
     }
 }

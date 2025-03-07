@@ -26,7 +26,7 @@ contract OptionContract {
     mapping(address => Option[]) public options;
     mapping(address => uint) public balances;
 
-    constructor() {
+    constructor() payable {
         owner = msg.sender;
         index = 0;
     }
@@ -44,6 +44,7 @@ contract OptionContract {
     );
     event OptionUpdated(address indexed seller, uint asset, uint256 expiryTime);
     event Withdraw(address indexed seller, uint amount);
+    event Received(address sender, uint amount);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner can call this function");
@@ -76,19 +77,6 @@ contract OptionContract {
         _;
     }
 
-    modifier validateOptionIfSoldOrExpired(address _seller, uint _index) {
-        require(_index < options[_seller].length, "Invalid option index");
-        require(
-            options[_seller][_index].status == Status.Available,
-            "Option is already sold or expired"
-        );
-        require(
-            block.timestamp < options[_seller][_index].expiryTime,
-            "Option has already expired"
-        );
-        _;
-    }
-
     function addOption(
         uint _asset,
         uint256 _expiryTime
@@ -115,6 +103,10 @@ contract OptionContract {
         require(
             options[_seller][_index].buyer == msg.sender,
             "Only buyer can exercise this option"
+        );
+        require(
+            options[_seller][_index].status == Status.Sold,
+            "Option is not sold yet"
         );
         require(
             block.timestamp < options[_seller][_index].expiryTime,
@@ -145,7 +137,6 @@ contract OptionContract {
         );
 
         uint lastIndex = options[msg.sender].length - 1;
-
         if (_index != lastIndex) {
             options[msg.sender][_index] = options[msg.sender][lastIndex];
             options[msg.sender][_index].index = _index;
@@ -179,8 +170,7 @@ contract OptionContract {
         options[_seller][_index].strikePrice = msg.value;
         options[_seller][_index].transactionTime = block.timestamp;
 
-        (bool success, ) = payable(_seller).call{value: msg.value}("");
-        require(success, "Transfer failed");
+        balances[_seller] += msg.value;
 
         emit OptionSold(_seller, msg.sender, msg.value);
     }
@@ -194,5 +184,9 @@ contract OptionContract {
         require(success, "Withdraw failed");
 
         emit Withdraw(msg.sender, amount);
+    }
+
+    receive() external payable {
+        emit Received(msg.sender, msg.value);
     }
 }
